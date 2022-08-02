@@ -1,4 +1,5 @@
 use rocksdb::{MergeOperands, Options, DB};
+use tracing::debug;
 
 pub struct CounterDb {
     db_client: DB,
@@ -23,6 +24,7 @@ impl CounterDb {
 
     pub fn get_key(&self, key: &str) -> u64 {
         // TODO: Actual error handling
+        debug!("Getting key: {}", key);
         let val = self.db_client.get(key).unwrap().unwrap();
         u64::from_be_bytes(val.try_into().unwrap())
     }

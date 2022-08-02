@@ -8,7 +8,7 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::GatewayIntents;
 use serenity::prelude::*;
 use serenity::Client;
-use tracing::info;
+use tracing::{debug, info};
 
 use std::sync::Arc;
 
@@ -68,9 +68,16 @@ impl DiscordClient {
 }
 
 #[hook]
-async fn normal_message_hook(_: &Context, msg: &Message) {
+async fn normal_message_hook(ctx: &Context, msg: &Message) {
     info!(
         "Message received: {:?} from {:?}",
         msg.content, msg.author.name
     );
+
+    let data = ctx.data.read().await;
+    let counter_db = data.get::<DBClient>().unwrap();
+
+    let key = format!("{}#{}", msg.author.name, msg.content);
+    counter_db.inc_key(&key, 1);
+    debug!("Incremented {} to {}", key, counter_db.get_key(&key));
 }
