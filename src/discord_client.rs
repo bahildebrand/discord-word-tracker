@@ -135,8 +135,7 @@ async fn parse_yt_link_channel(link: &str, yt_parser: &YoutubeParser) -> Option<
         }
     }
 
-    // TODO: Error handling is garbage here as well
-    return yt_parser.get_channel_name(video_id).await;
+    yt_parser.get_channel_name(video_id).await
 }
 
 struct YoutubeParserContainer;
