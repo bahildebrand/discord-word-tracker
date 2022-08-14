@@ -4,7 +4,6 @@ mod discord_client;
 use crate::discord_client::DiscordClient;
 
 use counter_db::CounterDb;
-use tracing_subscriber;
 
 #[tokio::main]
 async fn main() {

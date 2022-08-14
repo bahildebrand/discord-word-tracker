@@ -1,5 +1,6 @@
 use crate::counter_db::CounterDb;
 
+use regex::Regex;
 use serenity::client::{Context, EventHandler};
 use serenity::framework::standard::macros::hook;
 use serenity::framework::standard::StandardFramework;
@@ -10,6 +11,7 @@ use serenity::prelude::*;
 use serenity::Client;
 use tracing::{debug, info};
 
+use std::collections::HashSet;
 use std::sync::Arc;
 
 struct Handler;
@@ -25,6 +27,12 @@ struct DBClient;
 
 impl TypeMapKey for DBClient {
     type Value = Arc<CounterDb>;
+}
+
+struct Categories;
+
+impl TypeMapKey for Categories {
+    type Value = HashSet<String>;
 }
 
 pub struct DiscordClient {
@@ -53,6 +61,10 @@ impl DiscordClient {
             let mut data = client.data.write().await;
 
             data.insert::<DBClient>(counter_db_client.clone());
+
+            // TODO: Set this dynamically
+            let categories = HashSet::from(["ign".to_string()]);
+            data.insert::<Categories>(categories);
         }
 
         Self {
@@ -77,7 +89,17 @@ async fn normal_message_hook(ctx: &Context, msg: &Message) {
     let data = ctx.data.read().await;
     let counter_db = data.get::<DBClient>().unwrap();
 
-    let key = format!("{}#{}", msg.author.name, msg.content);
-    counter_db.inc_key(&key, 1);
-    debug!("Incremented {} to {}", key, counter_db.get_key(&key));
+    let categories = data.get::<Categories>().unwrap();
+    let lower_msg = msg.content.to_lowercase();
+
+    for category in categories {
+        let regex_string = format!(r"\b({})\b", category);
+        let re = Regex::new(&regex_string).unwrap();
+
+        if re.is_match(&lower_msg) {
+            let key = format!("USER#{}#{}", msg.author.name, category);
+            counter_db.inc_key(&key, 1);
+            debug!("Incremented {} to {}", key, counter_db.get_key(&key));
+        }
+    }
 }
