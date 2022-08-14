@@ -9,7 +9,7 @@ use serenity::model::gateway::Ready;
 use serenity::prelude::GatewayIntents;
 use serenity::prelude::*;
 use serenity::Client;
-use tracing::{debug, info};
+use tracing::{debug, error, info};
 
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -49,12 +49,15 @@ impl DiscordClient {
             .normal_message(normal_message_hook);
 
         // TODO: Actual error handling
-        let token = std::env::var("DISCORD_TOKEN").unwrap();
-        let client = Client::builder(&token, GatewayIntents::all())
+        let discord_token = std::env::var("DISCORD_TOKEN").unwrap();
+        let client = Client::builder(&discord_token, GatewayIntents::all())
             .event_handler(Handler)
             .framework(framework)
             .await
             .unwrap();
+
+        let youtube_token = std::env::var("YOUTUBE_TOKEN").unwrap();
+        let youtube_parser = YoutubeParser::new(youtube_token);
 
         let counter_db_client = Arc::new(counter_db_client);
         {
@@ -65,6 +68,8 @@ impl DiscordClient {
             // TODO: Set this dynamically
             let categories = HashSet::from(["ign".to_string()]);
             data.insert::<Categories>(categories);
+
+            data.insert::<YoutubeParserContainer>(youtube_parser);
         }
 
         Self {
@@ -90,7 +95,16 @@ async fn normal_message_hook(ctx: &Context, msg: &Message) {
     let counter_db = data.get::<DBClient>().unwrap();
 
     let categories = data.get::<Categories>().unwrap();
-    let lower_msg = msg.content.to_lowercase();
+
+    let yt_parser = data.get::<YoutubeParserContainer>().unwrap();
+
+    let lower_msg = if msg.content.contains("youtube.com") {
+        parse_yt_link_channel(&msg.content, yt_parser)
+            .await
+            .unwrap_or_else(|| msg.content.to_lowercase())
+    } else {
+        msg.content.to_lowercase()
+    };
 
     for category in categories {
         let regex_string = format!(r"\b({})\b", category);
@@ -100,6 +114,64 @@ async fn normal_message_hook(ctx: &Context, msg: &Message) {
             let key = format!("USER#{}#{}", msg.author.name, category);
             counter_db.inc_key(&key, 1);
             debug!("Incremented {} to {}", key, counter_db.get_key(&key));
+        }
+    }
+}
+
+async fn parse_yt_link_channel(link: &str, yt_parser: &YoutubeParser) -> Option<String> {
+    let args = link.split(|c| c == '?' || c == '&');
+    let mut video_id = String::from("");
+
+    for a in args {
+        let a_string = String::from(a);
+        let stripped_string = a_string.strip_prefix("v=");
+
+        match stripped_string {
+            Some(id) => {
+                video_id = String::from(id);
+                break;
+            }
+            None => continue,
+        }
+    }
+
+    // TODO: Error handling is garbage here as well
+    return yt_parser.get_channel_name(video_id).await;
+}
+
+struct YoutubeParserContainer;
+
+impl TypeMapKey for YoutubeParserContainer {
+    type Value = YoutubeParser;
+}
+
+pub struct YoutubeParser {
+    youtube_api_key: String,
+}
+
+impl YoutubeParser {
+    pub fn new(youtube_api_key: String) -> YoutubeParser {
+        YoutubeParser { youtube_api_key }
+    }
+
+    pub async fn get_channel_name(&self, video_id: String) -> Option<String> {
+        let video_url = format!(
+            "https://www.googleapis.com/youtube/v3/\
+                videos?part=snippet&id={}&key={}",
+            video_id, self.youtube_api_key
+        );
+
+        let res = reqwest::get(&video_url).await;
+        match res {
+            Err(e) => {
+                error!("Failed to get video by id: {}", e);
+                None
+            }
+            Ok(resp) => {
+                let json_val = json::parse(&resp.text().await.unwrap_or_default()[..]).unwrap();
+                let channel = json_val["items"][0]["snippet"]["channelTitle"].to_string();
+                Some(channel.to_lowercase())
+            }
         }
     }
 }
