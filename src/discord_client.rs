@@ -2,8 +2,8 @@ use crate::counter_db::CounterDb;
 
 use regex::Regex;
 use serenity::client::{Context, EventHandler};
-use serenity::framework::standard::macros::hook;
-use serenity::framework::standard::StandardFramework;
+use serenity::framework::standard::macros::{command, group, hook};
+use serenity::framework::standard::{Args, CommandResult, StandardFramework};
 use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::prelude::GatewayIntents;
@@ -12,7 +12,24 @@ use serenity::Client;
 use tracing::{debug, error, info};
 
 use std::collections::HashSet;
+use std::error::Error;
+use std::fmt;
 use std::sync::Arc;
+
+#[derive(Debug, Clone)]
+enum DiscordClientError {
+    InvalidArgs,
+}
+
+impl fmt::Display for DiscordClientError {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::InvalidArgs => write!(f, "Invalid number of args"),
+        }
+    }
+}
+
+impl Error for DiscordClientError {}
 
 struct Handler;
 
@@ -35,6 +52,47 @@ impl TypeMapKey for Categories {
     type Value = HashSet<String>;
 }
 
+struct YoutubeParserContainer;
+
+impl TypeMapKey for YoutubeParserContainer {
+    type Value = YoutubeParser;
+}
+
+#[command]
+#[description = "See the top shills for a category"]
+#[usage("~leaderboard <category>")]
+#[example("~leaderboard ign")]
+async fn leaderboard(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+    if args.len() != 1 {
+        return Err(DiscordClientError::InvalidArgs.into());
+    }
+
+    let data = ctx.data.read().await;
+    let counter_db = data.get::<DBClient>().unwrap();
+
+    let category = args.current().expect("Argument should always be present");
+    let mut results = counter_db.get_key_range_postfix(category);
+
+    results.sort_by(|&(_, a), &(_, b)| b.cmp(&a));
+    results
+        .iter_mut()
+        .for_each(|(key, _)| *key = key.split("#").into_iter().collect::<Vec<_>>()[1].to_string());
+
+    let mut response_string = format!("{} leaderboard:", category);
+    for res in results {
+        let row = format!("\n{} - {}", res.0, res.1);
+        response_string.push_str(&row);
+    }
+
+    msg.reply(&ctx, response_string).await.unwrap();
+
+    Ok(())
+}
+
+#[group]
+#[commands(leaderboard)]
+struct General;
+
 pub struct DiscordClient {
     client: Client,
     // FIXME: Use or remove this
@@ -46,6 +104,7 @@ impl DiscordClient {
     pub async fn new(counter_db_client: CounterDb) -> Self {
         let framework = StandardFramework::new()
             .configure(|c| c.with_whitespace(true).prefix("~"))
+            .group(&GENERAL_GROUP)
             .normal_message(normal_message_hook);
 
         // TODO: Actual error handling
@@ -136,12 +195,6 @@ async fn parse_yt_link_channel(link: &str, yt_parser: &YoutubeParser) -> Option<
     }
 
     yt_parser.get_channel_name(video_id).await
-}
-
-struct YoutubeParserContainer;
-
-impl TypeMapKey for YoutubeParserContainer {
-    type Value = YoutubeParser;
 }
 
 pub struct YoutubeParser {

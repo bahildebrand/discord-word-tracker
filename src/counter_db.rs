@@ -1,4 +1,6 @@
-use rocksdb::{MergeOperands, Options, DB};
+use std::collections::HashMap;
+
+use rocksdb::{Direction, IteratorMode, MergeOperands, Options, DB};
 use tracing::debug;
 
 pub struct CounterDb {
@@ -27,6 +29,21 @@ impl CounterDb {
         debug!("Getting key: {}", key);
         let val = self.db_client.get(key).unwrap().unwrap();
         u64::from_be_bytes(val.try_into().unwrap())
+    }
+
+    pub fn get_key_range_postfix(&self, key: &str) -> Vec<(String, u64)> {
+        let mode = IteratorMode::From(key.as_bytes(), Direction::Reverse);
+
+        self.db_client
+            .iterator(mode)
+            .map(|(key, value)| {
+                (
+                    // FIXME: These vec copies are gross
+                    String::from_utf8(key.to_vec()).unwrap(),
+                    u64::from_be_bytes(value.to_vec().try_into().unwrap()),
+                )
+            })
+            .collect()
     }
 }
 
