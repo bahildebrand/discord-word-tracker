@@ -71,12 +71,19 @@ async fn leaderboard(ctx: &Context, msg: &Message, mut args: Args) -> CommandRes
     let counter_db = data.get::<DBClient>().unwrap();
 
     let category = args.current().expect("Argument should always be present");
-    let mut results = counter_db.get_key_range_postfix(category);
+    let mut results = counter_db.prefix_get_key(category);
 
-    results.sort_by(|&(_, a), &(_, b)| b.cmp(&a));
-    results
-        .iter_mut()
-        .for_each(|(key, _)| *key = key.split("#").into_iter().collect::<Vec<_>>()[1].to_string());
+    results.sort_by(|(_, a), (_, b)| b.cmp(&a));
+    let results: Vec<(String, u64)> = results
+        .into_iter()
+        .map(|(key, value)| {
+            let key_string = std::str::from_utf8(&key).unwrap();
+            (
+                key_string.split("#").into_iter().collect::<Vec<_>>()[1].to_string(),
+                u64::from_be_bytes((*value).try_into().unwrap()),
+            )
+        })
+        .collect();
 
     let mut response_string = format!("{} leaderboard:", category);
     for res in results {
@@ -170,7 +177,7 @@ async fn normal_message_hook(ctx: &Context, msg: &Message) {
         let re = Regex::new(&regex_string).unwrap();
 
         if re.is_match(&lower_msg) {
-            let key = format!("USER#{}#{}", msg.author.name, category);
+            let key = format!("USER#{}#{}", category, msg.author.name);
             counter_db.inc_key(&key, 1);
             debug!("Incremented {} to {}", key, counter_db.get_key(&key));
         }

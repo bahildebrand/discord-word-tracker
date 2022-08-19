@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 use rocksdb::{Direction, IteratorMode, MergeOperands, Options, DB};
 use tracing::debug;
 
@@ -8,8 +6,7 @@ pub struct CounterDb {
 }
 
 impl CounterDb {
-    pub fn new() -> Self {
-        let db_path = std::env::var("DB_PATH").unwrap();
+    pub fn new(db_path: String) -> Self {
         let mut opts = Options::default();
 
         opts.create_if_missing(true);
@@ -31,19 +28,17 @@ impl CounterDb {
         u64::from_be_bytes(val.try_into().unwrap())
     }
 
-    pub fn get_key_range_postfix(&self, key: &str) -> Vec<(String, u64)> {
-        let mode = IteratorMode::From(key.as_bytes(), Direction::Reverse);
+    pub fn prefix_get_key(&self, key: &str) -> Vec<(Box<[u8]>, Box<[u8]>)> {
+        let mut iter = self.db_client.iterator(IteratorMode::Start);
+        iter.set_mode(IteratorMode::From(key.as_bytes(), Direction::Forward));
 
-        self.db_client
-            .iterator(mode)
-            .map(|(key, value)| {
-                (
-                    // FIXME: These vec copies are gross
-                    String::from_utf8(key.to_vec()).unwrap(),
-                    u64::from_be_bytes(value.to_vec().try_into().unwrap()),
-                )
-            })
-            .collect()
+        let mut results = Vec::new();
+        for item in iter {
+            let (key, value) = item;
+            results.push((key, value));
+        }
+
+        results
     }
 }
 
@@ -67,4 +62,59 @@ fn increment_merge(
 
     let result = val.to_be_bytes().into_iter().collect();
     Some(result)
+}
+
+#[cfg(test)]
+mod test {
+    use rand::Rng;
+    use std::sync::Arc;
+
+    use super::*;
+
+    struct TestDbWrapper {
+        counter_db: Option<Arc<CounterDb>>,
+        path: String,
+    }
+
+    impl TestDbWrapper {
+        fn new() -> Self {
+            let mut rng = rand::thread_rng();
+            let rng_num: u64 = rng.gen();
+            let path = format!("rocksdb-test-{}", rng_num);
+
+            Self {
+                counter_db: Some(Arc::new(CounterDb::new(path.clone()))),
+                path,
+            }
+        }
+
+        fn get_db(&self) -> Arc<CounterDb> {
+            self.counter_db.as_ref().unwrap().clone()
+        }
+    }
+
+    impl Drop for TestDbWrapper {
+        fn drop(&mut self) {
+            drop(self.counter_db.take().unwrap());
+            DB::destroy(&Options::default(), self.path.clone()).unwrap();
+        }
+    }
+
+    #[test]
+    fn test_prefix_key_fetch() {
+        let db = TestDbWrapper::new();
+        let counter_db = db.get_db();
+
+        counter_db.db_client.put("test#pre", "test").unwrap();
+        counter_db.db_client.put("test#pre#2", "test").unwrap();
+        counter_db.db_client.put("test#post#2", "test").unwrap();
+
+        println!("{:?}", counter_db.db_client.get("test#post").unwrap());
+
+        let result = counter_db.prefix_get_key("test#pre");
+
+        assert_eq!(result.len(), 2);
+        assert_eq!(std::str::from_utf8(&result[0].0).unwrap(), "test#pre");
+        assert_eq!(std::str::from_utf8(&result[1].0).unwrap(), "test#pre#2");
+    }
 }
