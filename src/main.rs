@@ -1,5 +1,7 @@
 mod counter_db;
 mod discord_client;
+#[cfg(test)]
+mod test_utils;
 
 use crate::discord_client::DiscordClient;
 

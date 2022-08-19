@@ -62,7 +62,7 @@ impl TypeMapKey for YoutubeParserContainer {
 #[description = "See the top shills for a category"]
 #[usage("~leaderboard <category>")]
 #[example("~leaderboard ign")]
-async fn leaderboard(ctx: &Context, msg: &Message, mut args: Args) -> CommandResult {
+async fn leaderboard(ctx: &Context, msg: &Message, args: Args) -> CommandResult {
     if args.len() != 1 {
         return Err(DiscordClientError::InvalidArgs.into());
     }
