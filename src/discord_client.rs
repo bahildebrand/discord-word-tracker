@@ -74,13 +74,13 @@ async fn leaderboard(ctx: &Context, msg: &Message, args: Args) -> CommandResult 
     let category_key = format!("USER#{}", category);
     let mut results = counter_db.prefix_get_key(&category_key);
 
-    results.sort_by(|(_, a), (_, b)| b.cmp(&a));
+    results.sort_by(|(_, a), (_, b)| b.cmp(a));
     let results: Vec<(String, u64)> = results
         .into_iter()
         .map(|(key, value)| {
             let key_string = std::str::from_utf8(&key).unwrap();
             (
-                key_string.split("#").into_iter().collect::<Vec<_>>()[2].to_string(),
+                key_string.split('#').into_iter().collect::<Vec<_>>()[2].to_string(),
                 u64::from_be_bytes((*value).try_into().unwrap()),
             )
         })
